@@ -221,6 +221,11 @@ Global settings use the `REOLINK_` prefix and also have matching CLI flags:
 
 ### Latency tuning
 
+Video timestamps retain camera timing within a one-second wall-clock drift
+bound. Larger drift or camera-counter resets re-anchor the clock, including
+after a camera reconnects. This keeps RTCP sender-report timing aligned with
+timestamp-less audio without requiring a proxy restart.
+
 The proxy paces media onto RTSP clients to smooth the bursty Baichuan delivery
 (which otherwise causes DTS jitter in downstream recorders). The pacing adds
 end-to-end latency: the video pacer starts `1500ms` behind the first frame,

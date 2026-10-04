@@ -829,21 +829,21 @@ type timestampUnwrapper struct {
 	highest uint64
 	offset  uint64
 	baseSet bool
-	// nowUnixMicro is optional; when nil, time.Now().UnixMicro is used (first sample anchors to wall clock).
+	// nowUnixMicro is optional; when nil, the arrival wall clock is used.
 	nowUnixMicro func() int64
 }
 
 func (u *timestampUnwrapper) unwrap(ts32 uint32) uint64 {
+	nowFn := u.nowUnixMicro
+	if nowFn == nil {
+		nowFn = func() int64 { return time.Now().UnixMicro() }
+	}
+	micros := nowFn()
+	if micros < 0 {
+		micros = 0
+	}
+	systemMicro := uint64(micros)
 	if !u.baseSet {
-		nowFn := func() int64 { return time.Now().UnixMicro() }
-		if u.nowUnixMicro != nil {
-			nowFn = u.nowUnixMicro
-		}
-		micros := nowFn()
-		if micros < 0 {
-			micros = 0
-		}
-		systemMicro := uint64(micros)
 		u.offset = systemMicro - uint64(ts32)
 		u.highest = uint64(ts32)
 		u.baseSet = true
@@ -851,10 +851,21 @@ func (u *timestampUnwrapper) unwrap(ts32 uint32) uint64 {
 	}
 
 	continuous := unwrapTimestamp(ts32, u.highest)
+	mapped := continuous + u.offset
+	// Timestamp-less audio anchors to arrival time and corrects drift above
+	// one second. Keep video on that same wall-clock timeline, including
+	// when a camera resets its counter while StreamPackets reconnects.
+	const maxDriftUS = uint64(time.Second / time.Microsecond)
+	if (mapped > systemMicro && mapped-systemMicro > maxDriftUS) ||
+		(mapped < systemMicro && systemMicro-mapped > maxDriftUS) {
+		u.offset = systemMicro - continuous
+		u.highest = continuous
+		return systemMicro
+	}
 	if continuous > u.highest {
 		u.highest = continuous
 	}
-	return continuous + u.offset
+	return mapped
 }
 
 type rtpTimestampGuard struct {
